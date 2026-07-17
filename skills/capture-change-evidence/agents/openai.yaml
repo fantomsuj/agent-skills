@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capture Change Evidence"
+  short_description: "Document architecture and UI changes with proof"
+  default_prompt: "Use $capture-change-evidence while implementing this change to record decisions and capture before-and-after evidence."
