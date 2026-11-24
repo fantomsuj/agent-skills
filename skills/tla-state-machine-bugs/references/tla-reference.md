@@ -21,7 +21,7 @@ A background job queue where a watchdog re-queues slow jobs without stopping the
 
 ```tla
 ---- MODULE JobQueue ----
-EXTENDS FiniteSets, TLC
+EXTENDS Naturals, FiniteSets, TLC
 CONSTANTS Jobs, Workers
 VARIABLES status, runners
 vars == <<status, runners>>
@@ -50,7 +50,7 @@ Finish(w, j) == /\ w \in runners[j]
                 /\ runners' = [runners EXCEPT ![j] = @ \ {w}]
 
 \* Legitimate final state: stutter so TLC doesn't report it as a deadlock
-Terminated == /\ \A j \in Jobs : status[j] = "done"
+Terminated == /\ \A j \in Jobs : status[j] = "done" /\ runners[j] = {}
               /\ UNCHANGED vars
 
 Next == \/ \E j \in Jobs : Timeout(j) \/ \E w \in Workers : Claim(w, j) \/ Finish(w, j)

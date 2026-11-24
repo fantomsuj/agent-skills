@@ -1,19 +1,23 @@
 ---
 name: tla-state-machine-bugs
-description: Find state-machine bugs in a codebase by extracting the implicit state machines hidden in the code, writing them out explicitly, modeling them in TLA+, and model-checking with TLC to get concrete counterexample traces. Use this skill whenever the user asks to find bugs in lifecycle or status logic (background jobs and queues, multi-step workflows, documents and publishing, accounts and permissions, sessions and connections, deployments, sync between systems), mentions race conditions, double-processing, stuck records, impossible states, retries, webhooks, idempotency, TLA+, PlusCal, TLC, formal verification or model checking, or asks to "make the state machine explicit", even if they never say "TLA+".
+description: Model-check a concurrent or multi-step lifecycle in TLA+ with TLC to find interleaving bugs (lost updates, double processing, stuck records) and trace each counterexample to the code. Use when the user asks for TLA+, PlusCal, TLC, model checking or formal verification, or asks to hunt for races in logic with several writers, non-atomic steps, or retries across systems (sync, queues, workflows) that tests and code reading have not settled. Not for a single race, retry or webhook question a targeted test can answer.
 ---
 
 # Finding state-machine bugs with TLA+
 
-Most production bugs in stateful code are transitions nobody thought about: a cancel that races a completion, a retry that runs a job twice, an event that arrives before the record it refers to exists. They live in *implicit* state machines spread across status columns, flags, timestamps, and the code paths that write them. No single file shows the whole machine, so code review rarely catches them.
+Some bugs only show up in an interleaving: a cancel that races a completion, a retry that runs a job twice, an event that arrives before the record it refers to exists. They live in *implicit* state machines spread across status columns, flags, timestamps, and the code paths that write them, where no single file shows the whole machine.
 
-The loop: make the machine explicit (writing it down surfaces many bugs), model it in TLA+, model-check it, and turn each counterexample into a reproducing test. Come back with *confirmed* bugs, each with a trace, a repro, and a code location, not a pile of speculation.
+The loop: make the machine explicit (writing it down often settles the question on its own), model only the tricky interleavings in TLA+, model-check them, and treat each counterexample as a hypothesis until a test reproduces it in the real code. Come back with *confirmed* bugs, each with a trace, a repro, and a code location, not a pile of speculation.
+
+This skill finds and reports. Changing production code, committing specs, or opening PRs is a separate step: ask the user before doing it, unless they already asked for fixes.
 
 ## Phase 0: Scope
 
 Pick one bounded component with a lifecycle: a status field, a background job or queue consumer, a multi-step workflow, a retry loop, a sync between two systems, a connection or session lifecycle, a deploy or migration process. If the user pointed at a whole repo, list candidates and start with the one involving concurrency, external systems, or side effects that can't be undone. Tell the user which one you picked and why.
 
-Model one machine at a time. Match the effort to the machine: a record with two states and one writer only needs the Phase 1 table. TLA+ pays off with several writers, non-atomic steps, external systems, or retries.
+Model one machine at a time.
+
+**Try the cheap checks first.** Many questions are settled without a model: read the transaction and lock boundaries, check the queue's delivery semantics (at-least-once? ordered per key?), or write one targeted test that forces the suspected interleaving. Do those first. Reach for TLA+ only when the interleavings are too many to reason about by hand: several writers, non-atomic steps, retries across systems. A record with two states and one writer needs the Phase 1 table at most.
 
 ## Phase 1: Extract the explicit state machine
 
@@ -66,13 +70,17 @@ For data-loss questions, abstract content to a set of edits and merges to set un
 
 ## Phase 3: Model-check
 
-**Guard against a spec that proves nothing.** Before trusting a green run, give the model a control: a second `.cfg` that turns off the one guard you believe makes it safe (the lock, the version check, the fix), and confirm that config fails. A control proves the model is sensitive to the mechanism you care about; a generic false invariant (e.g. `status[j1] /= "done"`) only proves states are reachable, so use it when there is no guard to remove. Also check that the distinct-states count isn't suspiciously small.
+**A green run is only as good as the model.** No single check proves the model is faithful, so do all of these before trusting one:
+
+- **Fidelity table.** For each action, name the code path it mirrors (`file:line`) and what it simplifies. Then list what the model leaves out (other writers, failure modes, the isolation level, bounds). Read the list as the limits of the result, and put it in the report.
+- **Control config.** A second `.cfg` that turns off the guard you believe makes it safe (the lock, the version check, the fix) must fail. That shows the model is sensitive to that guard; it does not show the model is complete.
+- **Reachability.** Confirm the behaviors that matter actually occur in the model, e.g. a temporary invariant that says "a conflict never happens" or "two writers never overlap" should fail. A state that is never reached is a sign of an over-constrained `Init` or guard, and so is a suspiciously small distinct-states count.
 
 **Expect the first counterexamples to be modeling errors.** An invariant is often stronger than what the system needs (it ignores a cleanup step, or a state a reader never looks at). Restate it as what the consumer actually relies on, and say so in the modeling notes. That is a correction, not a weakening; weakening is dropping a rule the business depends on.
 
 **Read each counterexample** as a story ("j1 queued, w1 claims it, the watchdog re-queues it, w2 claims it while w1 is still running...") and map every step to its `file:line`.
 
-## Phase 4: Confirm, then fix
+## Phase 4: Confirm, then (if asked) fix
 
 A TLC trace is a bug **in the model**. Before calling it a bug in the code:
 
@@ -80,13 +88,16 @@ A TLC trace is a bug **in the model**. Before calling it a bug in the code:
 2. Write a failing test that reproduces the trace (interleaved calls, a duplicated webhook, a forced crash between writes). The fastest route is usually the existing test suite with the network or database mock scripted to return the trace's outcomes in order (conflict, then offline, then success).
 3. Only then mark it **confirmed**. Anything unreproduced stays **suspected**, with the reason.
 
-Fix the spec first, re-run until it's green *and* the control still fails, then change the code and confirm the repro test passes. Run the neighboring test suites too: a fix that satisfies the model can break behavior the model abstracts away. If the shipped fix differs from the one you modeled, update the model to mirror the shipped one. Never weaken an invariant to get green unless the user agrees the business rule was wrong.
+If the user wants a fix: trying it in the spec first is a cheap experiment to see whether an idea closes the trace, nothing more. A green model of a hypothetical fix says nothing about the code you then write. After changing the code:
 
-Prefer fixes that make the machine more explicit: one status field instead of overlapping flags; removal as a state (`archived`, `revoked`, `rejected`) instead of a delete; a transition record (a timestamp per state if states are never revisited, otherwise a log table of timestamp, old state, new state, and event); and the stack's state-machine library (e.g. Ruby's `state_machines`, XState) so illegal transitions fail loudly.
+1. The repro test passes, and the neighboring test suites still pass (a fix that satisfies the model can break behavior the model abstracts away).
+2. Re-check the implementation against the model: update each changed action to mirror the code as shipped, with its `file:line`, re-run TLC, and confirm the control still fails. If the code and the model disagree, the model result doesn't cover the code.
+
+Let the fix fit the bug; the smallest change that closes the trace is usually right. Never weaken an invariant to get green unless the user agrees the business rule was wrong.
 
 ## Output
 
-Commit the spec next to the code (e.g. `specs/<machine>/`) with the `.tla`, `.cfg` files (each model's control included), state diagram, a short README covering what's modeled, what's abstracted away, and how to run it, and a script that runs every config and prints holds or violated. Check the repo's own rules for where non-code files may go first. Gitignore TLC's `states/` directory and `*_TTrace_*` files.
+If the user wants the spec kept, commit it next to the code (e.g. `specs/<machine>/`) with the `.tla`, `.cfg` files (each model's control included), state diagram, a short README covering what's modeled, what's abstracted away, and how to run it, and a script that runs every config and prints holds or violated. Check the repo's own rules for where non-code files may go first. Gitignore TLC's `states/` directory and `*_TTrace_*` files.
 
 Report in this shape:
 
@@ -102,7 +113,7 @@ Report in this shape:
 - Code: <file:line for each step>
 - Impact: <what goes wrong for users or data>
 - Repro: <test name or why it couldn't be reproduced>
-- Fix: <proposed change, and whether the spec now passes with it>
+- Fix: <proposed change; if made, whether the model of the shipped code passes>
 
 ## Checked and safe
 <each candidate the model refuted, and the guard that makes it safe (with its control result)>
