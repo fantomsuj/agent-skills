@@ -11,6 +11,7 @@ Read this when you reach Phase 2 (writing the spec) or Phase 3 (running TLC).
 - Invariants (safety): `TypeOK` plus the rules the domain depends on, such as at most one worker runs a job, nothing is published before approval, a revoked token is never accepted, a deleted record is never written to.
 - Temporal properties (liveness) only where they matter, such as every queued job eventually finishes. These need fairness (`WF_vars(Action)`) on actions the system guarantees will run.
 - Constants kept tiny: 2 or 3 entities, retries at most 2. Most concurrency bugs show up with 2 actors.
+- Sentinel values of one type: TLC errors when it compares values of different kinds (a string with a set). Use a boolean flag or a model value instead of `"none"` for "not set".
 
 PlusCal is fine when the logic reads more naturally as sequential code. Each label is one atomic step, so put labels exactly where the real code can be interleaved.
 
@@ -54,7 +55,7 @@ Terminated == /\ \A j \in Jobs : status[j] = "done"
 
 Next == \/ \E j \in Jobs : Timeout(j) \/ \E w \in Workers : Claim(w, j) \/ Finish(w, j)
         \/ Terminated
-Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
+Spec == Init /\ [][Next]_vars
 
 \* Domain rule: a job is never executed by two workers at once
 AtMostOneRunner == \A j \in Jobs : Cardinality(runners[j]) <= 1
@@ -77,6 +78,8 @@ Get `tla2tools.jar` from the tlaplus/tlaplus GitHub releases (needs Java 11+), t
 java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers auto -config Spec.cfg Spec.tla
 ```
 
-TLC reports deadlocks by default, which is usually what you want for lifecycles that should always progress. Add a stuttering action for states that are legitimately final (like `Terminated` above), or pass `-deadlock` to turn the check off.
+TLC reports deadlocks by default, which is useful for a closed lifecycle that should always progress. Add a stuttering action for states that are legitimately final (like `Terminated` above). A model whose environment is bounded by constants (at most N writes, versions up to MaxVer) always stops at the bound, so pass `-deadlock` there and state progress as a liveness property instead.
 
-If a run takes too long, shrink constants first, then add `SYMMETRY` for interchangeable entities. Apalache is an alternative for specs with large integer ranges.
+Runtime grows steeply with bounds: one more sequence number or clock value can turn 2 minutes into hours. Start with the smallest bounds that can show the bug, use a `CONSTRAINT` to cap history-like variables, and add `SYMMETRY` for interchangeable entities. Write TLC's output to a file rather than piping it into `grep`, which hides progress until the run ends. TLC leaves a `states/` directory and `*_TTrace_*` files next to the spec on every run.
+
+When a violation is found, TLC exits non-zero; a script that runs several configs under `set -e` must tolerate that.
