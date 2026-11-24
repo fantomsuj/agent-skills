@@ -4,12 +4,12 @@ Skills for coding agents and chatbots. Each skill is a directory under `skills/`
 
 ## Skills
 
-- **[capture-change-evidence](skills/capture-change-evidence/SKILL.md)** — records before-and-after evidence and design decisions while making architectural or UI changes.
-- **[tla-state-machine-bugs](skills/tla-state-machine-bugs/SKILL.md)** — finds lifecycle and race-condition bugs by extracting implicit state machines from code, modeling them in TLA+, and model-checking with TLC.
+- **[capture-change-evidence](skills/capture-change-evidence/SKILL.md):** records before-and-after evidence and design decisions while making architectural or UI changes.
+- **[tla-state-machine-bugs](skills/tla-state-machine-bugs/SKILL.md):** finds lifecycle and race-condition bugs by extracting implicit state machines from code, modeling them in TLA+, and model-checking with TLC. Draws on Tobi Lütke's "verification engineering" approach and Shopify Engineering's "Why Developers Should Be Force-Fed State Machines".
 
 ## External skills I use
 
-- **[socratic-tutor](https://github.com/janestreet/agent_skills/tree/main/socratic-tutor)** (Jane Street, MIT) — a strict Socratic tutor: diagnostic, skill map with levels 0–5, one question at a time, spaced review, and a final assessment. Triggers on "teach me", "tutor me", "quiz me". Useful for learning TLA+ itself before running `tla-state-machine-bugs`. Jane Street doesn't accept changes to it, so install it from their repo rather than copying it here.
+- **[socratic-tutor](https://github.com/janestreet/agent_skills/tree/main/socratic-tutor)** (Jane Street, MIT): a strict Socratic tutor with a diagnostic, a skill map with levels 0 to 5, one question at a time, spaced review, and a final assessment. Triggers on "teach me", "tutor me", "quiz me". Useful for learning TLA+ itself before running `tla-state-machine-bugs`. Jane Street doesn't accept changes to it, so install it from their repo rather than copying it here.
 
 ## How to use
 
