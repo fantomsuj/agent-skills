@@ -1,0 +1,4 @@
+interface:
+  display_name: "In-App Feedback Notes"
+  short_description: "Point at the running app, leave a note, and let agents work it from the repo"
+  default_prompt: "Use $in-app-feedback-notes to add an annotate-anything feedback layer to this app: notes committed as markdown files in the repo, marks on the elements they point at, and a coordinator skill that works them."
