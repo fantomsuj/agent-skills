@@ -13,19 +13,28 @@ The strategy (popularized by Tobi Lütke as "verification engineering") is:
 2. **Model it in TLA+** so every reachable state, interleaving, and failure is explored mechanically.
 3. **Model-check it**, turn each counterexample into a reproducing test, then fix and re-verify.
 
+The ways to spot implicit machines and the guidance on recording transitions draw on Shopify Engineering's "Why Developers Should Be Force-Fed State Machines".
+
 Your job is to run this loop and come back with *confirmed* bugs, each with a trace, a repro, and a location in the code — not a pile of speculation.
 
 ## Phase 0 — Scope
 
-Pick one bounded component with a lifecycle. Good targets: anything with a `status`/`state` field, a queue consumer, a payment/refund flow, a retry loop, a sync between two systems, an auth/session flow. If the user pointed at a whole repo, list candidate machines (search for status enums, `state =`, `is_*`/`has_*` flags, `*_at` timestamps, `transition`, `retry`, `webhook`) and start with the one where concurrency or money is involved. Tell the user which one you picked and why.
+Pick one bounded component with a lifecycle. Good targets: anything with a `status`/`state` field, a queue consumer, a payment/refund flow, a retry loop, a sync between two systems, an auth/session flow. If the user pointed at a whole repo, list candidate machines (search for status enums, `state =`, `is_*`/`has_*` flags such as `is_published` or `paid`, nullable `*_at` timestamps such as `published_at`, start/end date pairs on records that are only valid for a period (subscriptions, trials, holds), `transition`, `retry`, `webhook`, and `delete`/`destroy` calls on lifecycle entities) and start with the one where concurrency or money is involved. Tell the user which one you picked and why.
 
 Model one machine at a time. A spec that tries to cover the whole system never finishes checking and nobody can read it.
+
+Match the effort to the machine. A record with two states and one writer only needs the Phase 1 table, so skip TLA+ there. TLA+ pays off when there are several writers, steps that aren't atomic, external systems, or retries.
 
 ## Phase 1 — Extract the explicit state machine
 
 Read the code and build this inventory before writing any TLA+. It's the most valuable artifact in the whole process, and the spec will only be as good as it is.
 
 **State variables.** Every field that encodes where an entity is in its life: enums, booleans, nullable timestamps, counters, foreign keys whose presence matters, plus *external* state (the payment provider's view, a cache, a message queue). The real state is the product of all of these, so note combinations the code implicitly assumes can't happen (e.g. `shipped_at` set while `status = "pending"`).
+
+Two kinds of state are easy to miss:
+
+- **Time.** A record with start and end dates changes state when the clock passes the end date, even though no code path writes anything. Find out what actually acts on expiry: a cron job, a check when the record is read, or nothing. Model expiry as its own action (`Expire(o)`) that can fire at any point, including in the middle of other transitions.
+- **Deletion.** A hard delete is a transition into an implicit "gone" state that nothing can leave. It erases the history and can leave behind dangling references, queued jobs, and webhooks for an entity that no longer exists. Model `Delete` as a transition and check what can still act on the entity afterward.
 
 **Transitions.** Every code path that writes a state variable. For each, record:
 
@@ -46,6 +55,11 @@ Then write the machine out as a list of states and allowed transitions (a Mermai
 - Transitions whose guard is missing or weaker than the others into the same state
 - Flag combinations that are reachable but that no code handles
 - Two writers to the same field with no coordination
+- Time-based states that nothing enforces (an expired subscription that still grants access)
+- Hard deletes of entities that other records, jobs, or webhooks can still reach
+- Internal states leaking into an external API, or API clients able to request transitions the machine shouldn't allow
+
+**Check history if it exists.** Some systems already record transitions: an audit log, a transitions table, event-sourcing streams, or per-state timestamps. If yours does, it gives you evidence from production. Ask the user before querying anything outside a dev environment. Then look for logged transitions that aren't in your table, entities that reached a state with no legal path to it, and entities that have sat in a non-terminal state for an unusually long time. A hit here is stronger evidence than any model, because it already happened.
 
 Record each as a **candidate**. Phase 2 confirms or rejects them.
 
@@ -136,6 +150,13 @@ A TLC trace shows a bug **in the model**. Before calling it a bug in the code:
 3. Only then report it as **confirmed**. Anything you couldn't reproduce stays **suspected**, with the reason.
 
 When fixing, change the spec first (add the guard, make the step atomic, add an idempotency key), re-run TLC until it's green *and* the false-invariant check still trips, then make the matching code change and confirm the repro test passes. Don't make the invariant weaker to get a green run unless the user agrees the business rule was wrong.
+
+Fixes that make the machine more explicit tend to stay fixed:
+
+- **Replace flag combinations with one explicit state** where the code is effectively treating several booleans as a status field.
+- **Model removal as a state instead of a delete.** Mark records `spam`, `fraud`, or `cancelled_by_admin` rather than deleting them. This keeps them accountable and keeps their history.
+- **Record transitions.** If the machine never revisits a state, a timestamp per state is enough (`paid_at`, `shipped_at`). If states can recur, use a log table with the timestamp, old state, new state, and the event that triggered it, because per-state fields get overwritten. A log also lets you validate the spec against real behavior later, and answer questions like how long fraud takes to detect.
+- **Use the stack's state-machine library** where one exists (e.g. Ruby's `state_machines` gem or XState), so transitions are declared in one place and illegal ones fail loudly. Keep the TLA+ spec in step with the declared machine.
 
 ## Output
 
