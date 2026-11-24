@@ -1,17 +1,17 @@
 ---
 name: tla-state-machine-bugs
-description: Find state-machine bugs in a codebase by extracting the implicit state machines hidden in the code, writing them out explicitly, modeling them in TLA+, and model-checking with TLC to get concrete counterexample traces. Use this skill whenever the user asks to find bugs in lifecycle or status logic (orders, payments, subscriptions, jobs, sessions, connections, onboarding, sync), mentions race conditions, double-processing, stuck records, impossible states, retries, webhooks, idempotency, TLA+, PlusCal, TLC, formal verification or model checking, or asks to "make the state machine explicit", even if they never say "TLA+".
+description: Find state-machine bugs in a codebase by extracting the implicit state machines hidden in the code, writing them out explicitly, modeling them in TLA+, and model-checking with TLC to get concrete counterexample traces. Use this skill whenever the user asks to find bugs in lifecycle or status logic (background jobs and queues, multi-step workflows, documents and publishing, accounts and permissions, sessions and connections, deployments, sync between systems), mentions race conditions, double-processing, stuck records, impossible states, retries, webhooks, idempotency, TLA+, PlusCal, TLC, formal verification or model checking, or asks to "make the state machine explicit", even if they never say "TLA+".
 ---
 
 # Finding state-machine bugs with TLA+
 
-Most production bugs in stateful code are transitions nobody thought about: a cancel that lands after a charge, a retry that runs twice, a webhook that arrives before the row exists. They live in *implicit* state machines spread across status columns, flags, timestamps, and the code paths that write them. No single file shows the whole machine, so code review rarely catches them.
+Most production bugs in stateful code are transitions nobody thought about: a cancel that races a completion, a retry that runs a job twice, an event that arrives before the record it refers to exists. They live in *implicit* state machines spread across status columns, flags, timestamps, and the code paths that write them. No single file shows the whole machine, so code review rarely catches them.
 
 The loop: make the machine explicit (writing it down surfaces many bugs), model it in TLA+, model-check it, and turn each counterexample into a reproducing test. Come back with *confirmed* bugs, each with a trace, a repro, and a code location, not a pile of speculation.
 
 ## Phase 0: Scope
 
-Pick one bounded component with a lifecycle: a status field, a queue consumer, a payment or refund flow, a retry loop, a sync between two systems, an auth flow. If the user pointed at a whole repo, list candidates and start with the one involving concurrency or money. Tell the user which one you picked and why.
+Pick one bounded component with a lifecycle: a status field, a background job or queue consumer, a multi-step workflow, a retry loop, a sync between two systems, a connection or session lifecycle, a deploy or migration process. If the user pointed at a whole repo, list candidates and start with the one involving concurrency, external systems, or side effects that can't be undone. Tell the user which one you picked and why.
 
 Model one machine at a time. Match the effort to the machine: a record with two states and one writer only needs the Phase 1 table. TLA+ pays off with several writers, non-atomic steps, external systems, or retries.
 
@@ -22,19 +22,19 @@ Build this inventory before writing any TLA+. The spec is only as good as it is.
 **State variables.** Everything that encodes where an entity is in its life:
 
 - Status enums and `state` columns
-- Boolean flags (`is_published`, `paid`)
-- Nullable timestamps (`published_at`), where null means "hasn't happened"
-- External state: the payment provider's view, a cache, a queue
-- **Time:** start/end dates on records valid for a period (subscriptions, trials, holds). The state changes when the clock passes, with no code writing anything. Find out what acts on expiry: a cron job, a check at read time, or nothing.
+- Boolean flags (`is_published`, `archived`, `verified`)
+- Nullable timestamps (`published_at`, `completed_at`), where null means "hasn't happened"
+- External state: a third-party API's view, another service's copy, a cache, a queue
+- **Time:** start/end dates on records valid for a period (leases, invites, tokens, trials, reservations). The state changes when the clock passes, with no code writing anything. Find out what acts on expiry: a cron job, a check at read time, or nothing.
 - **Deletion:** a hard delete is a transition into a "gone" state. It erases history and can strand references, queued jobs, and webhooks.
 
-The real state is the product of all of these, so note combinations the code assumes can't happen (`shipped_at` set while `status = "pending"`).
+The real state is the product of all of these, so note combinations the code assumes can't happen (`completed_at` set while `status = "queued"`).
 
 **Transitions.** Every code path that writes a state variable:
 
 | Transition | From (guard) | Writes | Trigger | Atomic? | Location |
 |---|---|---|---|---|---|
-| Pay | status = pending | status:=paid, charged:=true | POST /pay | no: charge, then DB write | `orders/service.py:142` |
+| Claim | status = queued | status:=running, worker:=w | queue poll | no: SELECT, then UPDATE | `jobs/worker.py:88` |
 
 - **Guard:** what the code actually checks, not what it should. A missing check is a finding.
 - **Trigger:** user action, webhook, cron, queue message, timeout, admin tool, migration.
@@ -61,9 +61,9 @@ Mirror the **code**, not the design doc. If you model intended behavior, TLC ver
 
 ## Phase 3: Model-check
 
-**Guard against a spec that proves nothing.** Before trusting a green run, add a false invariant (e.g. `status[o1] /= "shipped"`) and confirm TLC reaches it, and check that the distinct-states count isn't suspiciously small. Otherwise your guards or `Init` are over-constrained.
+**Guard against a spec that proves nothing.** Before trusting a green run, add a false invariant (e.g. `status[j1] /= "done"`) and confirm TLC reaches it, and check that the distinct-states count isn't suspiciously small. Otherwise your guards or `Init` are over-constrained.
 
-**Read each counterexample** as a story ("o1 pending, user pays, charge succeeds, user cancels before the DB write...") and map every step to its `file:line`.
+**Read each counterexample** as a story ("j1 queued, w1 claims it, the watchdog re-queues it, w2 claims it while w1 is still running...") and map every step to its `file:line`.
 
 ## Phase 4: Confirm, then fix
 
@@ -75,7 +75,7 @@ A TLC trace is a bug **in the model**. Before calling it a bug in the code:
 
 Fix the spec first, re-run until it's green *and* the false-invariant check still trips, then change the code and confirm the repro test passes. Never weaken an invariant to get green unless the user agrees the business rule was wrong.
 
-Prefer fixes that make the machine more explicit: one status field instead of overlapping flags; removal as a state (`spam`, `fraud`) instead of a delete; a transition record (a timestamp per state if states are never revisited, otherwise a log table of timestamp, old state, new state, and event); and the stack's state-machine library (e.g. Ruby's `state_machines`, XState) so illegal transitions fail loudly.
+Prefer fixes that make the machine more explicit: one status field instead of overlapping flags; removal as a state (`archived`, `revoked`, `rejected`) instead of a delete; a transition record (a timestamp per state if states are never revisited, otherwise a log table of timestamp, old state, new state, and event); and the stack's state-machine library (e.g. Ruby's `state_machines`, XState) so illegal transitions fail loudly.
 
 ## Output
 
@@ -93,7 +93,7 @@ Report in this shape:
 ### 1. <one-line title> (confirmed | suspected)
 - Trace: <numbered steps, plain English>
 - Code: <file:line for each step>
-- Impact: <what goes wrong for users/money/data>
+- Impact: <what goes wrong for users or data>
 - Repro: <test name or why it couldn't be reproduced>
 - Fix: <proposed change, and whether the spec now passes with it>
 
