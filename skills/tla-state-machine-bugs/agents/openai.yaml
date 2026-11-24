@@ -1,0 +1,4 @@
+interface:
+  display_name: "TLA+ State Machine Bugs"
+  short_description: "Find lifecycle and race bugs by model-checking implicit state machines"
+  default_prompt: "Use $tla-state-machine-bugs to extract the implicit state machine in this component, model it in TLA+, and report confirmed bugs with traces."
