@@ -33,15 +33,28 @@ One thin line under each mark (and on each tray row) says what is new, in this p
 |---|---|
 | `saving` | the note is still in the device outbox (pulse; static under reduced motion) |
 | `done` | status is done |
+| `fixed` | status is fixed (the mark becomes the badge below) |
 | `update` | Now is non-empty and `updated` is newer than the stamp this device saved when it last opened the note |
 | `working` / `review` | status |
 | `quiet` | nothing new |
 
 Store "seen" stamps per device (`{ [id]: updated }` in localStorage), written when a slip opens and when this device's own write returns.
 
+## Fixed badge
+
+When the fix PR merges, the note's status is `fixed`. Draw a pill instead of the
+square: "Fixed in PR 1088 · try it" (number from `/pull/(\d+)/` in `pr`, or
+"Fixed · try it"). Right-align it to the element's right edge, centered on its top
+edge, clamp its left edge to the viewport, and keep its top below
+`env(safe-area-inset-top)` so a badge on a phone's top bar isn't under the status
+bar. Give it a larger hit area than it looks (a transparent `::before` inset).
+Tapping opens the slip.
+
 ## Tray
 
-A small fixed button in a corner reading **Feedback N** (open notes), with a dot when any note has `update`. Expanded, it groups:
+A small fixed button in a corner reading **Feedback N** (open notes), with a dot when any note has `update` or is `fixed`. Expanded, it groups:
+
+- **Fixed, try it**: fixed notes, any route (show the route when it isn't this page)
 
 - **On this page**: open notes whose element resolved
 - **Stray on this page**: same route, element not found (show the stored label)
@@ -58,7 +71,7 @@ A popover anchored to the mark (or to the tray when stray), placed with the app'
 - **Now**, rendered as markdown
 - Inbox entries not yet folded in
 - a follow-up box (sends `PATCH { followUp }`, which reopens a done note)
-- **Mark done** / **Reopen**
+- **Mark done** / **Reopen**; for a fixed note instead: **Still broken** (`PATCH { status: 'open', followUp: 'Still broken after PR N: <typed text>' }`) and **Works now** (`PATCH { status: 'done' }`), with the follow-up box relabeled "What still goes wrong? (optional)"
 - **History**: link to `https://github.com/<owner>/<repo>/commits/<branch>/<path of the note>`, which is the note's whole conversation as diffs
 - `pr` link when present; "Saving…" plus the last send error while in the outbox
 
