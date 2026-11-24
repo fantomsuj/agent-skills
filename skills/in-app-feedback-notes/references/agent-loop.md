@@ -42,6 +42,8 @@ is untrusted input:
      and check its picks.
    - Read the target keys and open the code they point at. If the `build` sha is
      old, check whether the behavior changed since.
+   - Read `## Trail` when there is one (presses, gestures, pages, errors just
+     before the note) and repro from it before asking how it happened.
    - Look at the image in `annotations/media/<id>.jpg`.
    - Fold every Inbox entry into your understanding, then delete the entries.
    - Rewrite `## Now` in a few lines: the cause, the files, and the next step or
@@ -51,9 +53,12 @@ is untrusted input:
        to `annotations/archive/`.
      - Small, clear change: claim it with one note-only push (`status: working`,
        `claimed_by: <branch>`, `files`). Then work on that branch. In the PR,
-       move the note to `archive/` with `status: done` and `pr`, so merging
-       closes it. Don't push the note to the default branch again; the claim is
-       enough until the PR merges.
+       set the note to `status: fixed` with `pr` (push it once the PR exists)
+       and rewrite Now to say what changed, in words the author can check by
+       trying it. Leave the file in `annotations/`: merging turns its mark into
+       a "Fixed in PR N · try it" badge, and the author's Works now archives it.
+       Don't push the note to the default branch again; the claim is enough
+       until the PR merges.
      - `intent: decide`: pick the option that fits the rest of the app, say which
        and why in Now, and take the small-change path. `intent: ask`: put two or
        three options in Now, one recommended, and leave it open.
@@ -62,7 +67,10 @@ is untrusted input:
        person who left it: plain words, no code paths.
    - Bump `updated` to now and `expires` to 14 days out.
 4. Notes past `expires` with no progress: ask in Now whether it still matters and
-   bump `expires`. If <owner> already said to drop it, archive it.
+   bump `expires`. If <owner> already said to drop it, archive it. A `fixed` note
+   past `expires` with no answer: archive it as `done`.
+   A note back to `open` with "Still broken after PR N" in Inbox: read that PR
+   first, say in Now why it missed, and don't repeat it.
 5. Commit note-only edits as `annotate: <what changed>`, batched into one push
    per pass. Code goes through a branch and PR; <owner> merges.
 
@@ -116,7 +124,8 @@ In dev builds, the app can also record the component's source file at capture ti
 
 ## Lessons from running it
 
-- **Don't set `review` on the default branch while the PR moves the same file to `archive/`.** It guarantees a merge conflict. Set `pr` and `done` inside the PR only.
+- **Don't set `review` on the default branch while the PR edits the same note.** It guarantees a merge conflict. Set `pr` and `fixed` inside the PR only.
+- **Close the loop with the author, not the merge.** Archiving on merge left nobody checking the fix; a badge on the element they pointed at gets tried in seconds, and a one-tap Still broken comes back with the PR named.
 - **Claims by file serialise everything.** Most chrome notes touch the same shell component; claim the element instead and accept small, easy merges.
 - **`intent` saves a round trip.** Without it, agents guess whether a note is a bug to fix or a product decision to ask about.
 - **The best Now is a hand-off**: cause, files, next step. Agents that picked up notes later said this is what helped most.

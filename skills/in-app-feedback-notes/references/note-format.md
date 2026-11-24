@@ -8,7 +8,7 @@ One note is one markdown file. This is the contract between the app (which write
 annotations/
   README.md            the contract (below)
   <id>.md              open notes
-  archive/<id>.md      done notes, moved here by the fix PR or by Mark done
+  archive/<id>.md      done notes, moved here when the author confirms a fix (Works now) or by Mark done
   archive/.gitkeep
   media/<id>.jpg       the crop around the pointed-at element
 ```
@@ -36,7 +36,7 @@ This README is the contract between the app and the agents.
 id: "01JC…"
 type: "bug"            # bug | idea | question | other
 intent: "ask"          # optional, team notes only: decide | ask
-status: "open"         # open | working | review | done
+status: "open"         # open | working | review | fixed | done
 title: "Menu opens off screen"
 route: "/doc/:id"
 author: "Sam"
@@ -61,6 +61,15 @@ The author's note, exactly as written. Never edit it.
 
 ![Pointed-at area](media/01JC….jpg)
 
+## Trail
+
+What happened in the 10 seconds before the note, oldest first.
+
+- -6.2s page: /doc/01JB…
+- -2.4s pinch [canvas]
+- -0.8s tap button "More tools" [more-tools]
+- -0.3s error: TypeError: …
+
 ## Now
 
 The agent's current understanding, decision and next step. Rewrite this whole
@@ -76,7 +85,12 @@ delete it from the Inbox.
 ```
 
 Values are JSON strings, but bare values (`status: working`) also parse.
-Unknown keys are ignored. `## Now` and `## Inbox` are the only `##` headings.
+Unknown keys are ignored. `## Trail`, `## Now` and `## Inbox` are the only `##` headings.
+
+`## Trail` is written once when the note is saved and never edited: presses,
+drags, pinches, scrolls, page changes and console errors from the 10 seconds
+before the author opened feedback. Never keystrokes or on-screen text; outside
+notes keep only test ids, card kinds and pages. Older notes have none.
 
 ## How a note finds its element
 
@@ -92,7 +106,11 @@ When you change markup a note points at, update its target keys in the same PR.
 | `open` | Not picked up, or waiting on the owner | the app on create or follow-up; the agent after asking |
 | `working` | Claimed; an agent is on it | the agent, with `claimed_by` and `files` |
 | `review` | A PR is open; `pr` links it | set inside the PR, never as a separate push |
-| `done` | Merged, answered, or dropped; file is in `archive/` | the fix PR itself, or the owner with Mark done |
+| `fixed` | The fix PR merged; the note stays as a "Fixed in PR N · try it" badge on its element | the fix PR itself, with `pr` set |
+| `done` | Confirmed, answered, or dropped; file is in `archive/` | the author with Works now or Mark done; the agent for answered questions and dropped notes |
+
+Works now sets `done` (archive). Still broken sets `open` and adds an Inbox entry
+"Still broken after PR N: …". A `fixed` note past `expires` with no answer is archived.
 
 ## Claims
 
@@ -154,6 +172,6 @@ Details that bit in practice:
 
 - **Image path is relative to the note's folder.** Write `media/<id>.jpg` for open notes and `../media/<id>.jpg` once archived, or the link breaks after the move. Strip that line when parsing so it never ends up in the note text.
 - **Empty Now** is written as a placeholder (`_Not picked up yet._`) so a human reading the file on GitHub sees the state; parse it back to empty.
-- **"Needs an agent"** is `status !== 'done' && (inbox.length > 0 || now === '')`. Share this function between the app and any scripts.
+- **"Needs an agent"** is `status !== 'done' && (inbox.length > 0 || (status !== 'fixed' && now === ''))`: a fixed note waits on its author. Share this function between the app and any scripts.
 - **Title** is the first non-empty line of the note, cut to 80 characters.
 - **Expiry** is created/updated + 14 days, as a date.

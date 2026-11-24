@@ -22,11 +22,12 @@ const create = z.object({
   target: targetSchema.nullable(),
   build: z.string().max(80).optional(),
   crop: z.string().max(Math.ceil((CROP_MAX_BYTES * 4) / 3) + 4).nullable(), // base64 JPEG
+  trail: z.array(trailEvent).max(40).optional(), // { ms <= 0, kind, testId?, label?, where?, detail? }
 })
 const update = z.object({
   id: idSchema,
   followUp: z.string().trim().min(1).max(MESSAGE_MAX).optional(),
-  status: z.enum(['open', 'working', 'review', 'done']).optional(),
+  status: z.enum(['open', 'working', 'review', 'fixed', 'done']).optional(),
 }).refine((v) => v.followUp !== undefined || v.status !== undefined)
 ```
 
@@ -84,11 +85,11 @@ if (taken) return taken.authorId === by.authorId ? 200 { annotation: taken } : 4
 
 - `authorKey(user) = sha256('<app>-annotation:' + user.id).hex.slice(0, 16)`: stable per account, not reversible, safe in a public repo. Each person sees their own notes by matching it.
 - `isTeam` is a server-side allow list (emails or user ids in an env var), never a client flag.
-- **Scrub** for outside notes: drop `crop` and `intent`; replace `label` with something like `"<testId or tag> in a <kind>"`; drop `text`, `ariaLabel`, titles; blank `selector` and `path` if they quote an aria-label. Opaque ids (entity id, test id) still re-attach the note.
+- **Scrub** for outside notes: drop `crop` and `intent`; replace `label` with something like `"<testId or tag> in a <kind>"`; drop `text`, `ariaLabel`, titles; blank `selector` and `path` if they quote an aria-label. Drop each trail event's `label`, and the `detail` of error and warning events. Opaque ids (entity id, test id) still re-attach the note.
 
 ## Update
 
-Inside one `transact`: read the open path, else the archive path; 404 if missing or the caller may not see it. A follow-up appends to Inbox and reopens a done note; a status change sets it. Bump `updated` and `expires`. If the status moved the file across `annotations/` and `archive/`, write the new path and delete the old in the same commit.
+Inside one `transact`: read the open path, else the archive path; 404 if missing or the caller may not see it. A follow-up appends to Inbox and reopens a done or fixed note; a status change sets it, and both can come in one call (Still broken sends `status: 'open'` with the follow-up). Keep `## Trail` as it was. Bump `updated` and `expires`. If the status moved the file across `annotations/` and `archive/`, write the new path and delete the old in the same commit.
 
 ## Visibility
 

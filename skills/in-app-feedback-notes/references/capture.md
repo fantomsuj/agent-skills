@@ -85,6 +85,7 @@ Freeze it when the dialog opens, so it describes the moment of the problem, not 
 - app-level summary: which document, counts, focused and selected objects (ids, kinds, short titles). **Never bodies or user content.**
 - sync and collaboration status, pending writes
 - last ~20 app diagnostics and last ~30 console errors and warnings
+- the trail (below)
 
 Console buffer: wrap `console.error` and `console.warn` once, call the original first (so DevTools call-site links are unchanged), stringify safely (circular refs, Errors with stacks), cap each message at 1000 characters and the buffer at 50, and guard re-entry.
 
@@ -100,7 +101,34 @@ text
 route.split(/[?#]/)[0].replace(/^\/share\/[^/]+/, '/share/:token')  // capability segments
 ```
 
-For repo-committed notes, the context snapshot usually stays out of the file (it goes to the issue-tracker sink, if there is one); `build`, `route` and the target are enough for an agent to start.
+## Trail: the last 10 seconds
+
+Install once at startup, next to the console wrapper. Passive capture-phase
+listeners on `window`:
+
+- `pointerdown/move/up/cancel`: a press that moved under ~12px is a click, tap or
+  pencil tap (from `pointerType`); farther is a drag (record the distance). A second
+  pointer down while one is held is one `pinch`; swallow the ups that follow. A
+  cancelled touch that never moved is the browser scrolling, not a press.
+- `wheel`: fold events less than ~400ms apart into one `scroll` (or `zoom` when
+  `ctrlKey`, which is a trackpad pinch) with a step count.
+- page changes: wrap `history.pushState`/`replaceState` and listen to `popstate`;
+  record the redacted route only when it changed.
+- `error` and `unhandledrejection`, redacted; merge the console buffer at snapshot
+  time.
+
+Name a press by the nearest control's `data-testid`, accessible name (`aria-label`
+or `title`) or role, and the kind of card or panel it sits in. Never read
+`textContent` and never listen to key events: the trail goes into a repo.
+Skip events inside the feedback UI. Keep a capped ring (2x window, ~80 events).
+
+Freeze it when the feedback flow starts (stage goes from none to picking or
+composing), not when the dialog mounts: pointing takes seconds and would push out
+what happened. Snapshot = events in `[frozenAt - 10s, frozenAt]`, oldest first, as
+offsets in ms (`ms <= 0`), at most 40. Send it with the note; the server renders
+it as `## Trail`, one line each: `- -2.4s pinch [canvas] in text card: 3 steps`.
+
+For repo-committed notes, the rest of the context snapshot usually stays out of the file (it goes to the issue-tracker sink, if there is one); `build`, `route` and the target are enough for an agent to start.
 
 ## Outbox
 
